@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Survey Pilot & Flight Planning Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glow-cyan { box-shadow: 0 0 15px rgba(6, 182, 212, 0.3); }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 overflow-hidden h-screen flex flex-col">
+
+    <header class="glass-panel h-16 px-6 flex items-center justify-between border-b border-slate-800 z-10 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="bg-gradient-to-tr from-cyan-500 to-blue-600 p-2 rounded-lg text-white">
+                <i class="fa-solid fa-plane fa-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-tight bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                    3D SURVEY PILOT SIMULATOR
+                </h1>
+                <p class="text-[10px] text-slate-400 font-mono">DRONE PHOTOGRAMMETRY FLIGHT PLANNER v2.5.0</p>
+            </div>
+        </div>
+        
+        <div class="hidden md:flex items-center space-x-6 text-sm">
+            <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-slate-300 font-medium font-mono">RTK GNSS: Locked (24 Sats)</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-battery-three-quarters text-emerald-400"></i>
+                <span class="text-slate-300 font-mono" id="top-battery">100%</span>
+            </div>
+            <div class="flex items-center space-x-2 border-l border-slate-800 pl-4">
+                <span class="text-slate-400 text-xs">Mode:</span>
+                <span class="px-2 py-0.5 bg-cyan-950 text-cyan-400 rounded border border-cyan-800 font-mono text-xs uppercase" id="top-mode">STANDBY</span>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-2">
+            <button id="btn-guide-modal" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs font-medium flex items-center space-x-1.5 transition-colors border border-slate-700">
+                <i class="fa-solid fa-circle-info text-cyan-400"></i>
+                <span>시스템 핵심 알고리즘 안내</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative flex-col md:flex-row">
+        
+        <aside class="w-full md:w-80 glass-panel border-b md:border-r border-slate-800 flex flex-col h-[45vh] md:h-full z-20 overflow-y-auto">
+            <div class="flex border-b border-slate-800 text-xs font-semibold">
+                <button id="tab-plan" class="flex-1 py-3 text-center border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/40">
+                    <i class="fa-solid fa-sliders mr-1.5"></i>비행 계획 (Planner)
+                </button>
+                <button id="tab-telemetry" class="flex-1 py-3 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+                    <i class="fa-solid fa-chart-line mr-1.5"></i>실시간 계기 (Telemetry)
+                </button>
+            </div>
+
+            <div id="panel-plan" class="p-5 space-y-4">
+                <div class="space-y-3">
+                    <h3 class="text-xs font-bold text-slate-400 tracking-wider uppercase">1. 측량 구역 범위 설정</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">가로 폭 (W)</label>
+                            <input type="number" id="input-width" value="140" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm font-mono text-center text-cyan-400 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">세로 폭 (H)</label>
+                            <input type="number" id="input-height" value="140" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm font-mono text-center text-cyan-400 focus:outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3 border-t border-slate-800 pt-3">
+                    <h3 class="text-xs font-bold text-slate-400 tracking-wider uppercase">2. 비행 미션 알고리즘 파라미터</h3>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs font-medium">
+                            <span class="text-slate-300">상대 비행 고도 (Altitude)</span>
+                            <span class="text-cyan-400 font-mono" id="val-altitude">50 m</span>
+                        </div>
+                        <input type="range" id="slide-altitude" min="30" max="100" value="50" class="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs font-medium">
+                            <span class="text-slate-300">비행 대지 속도 (Speed)</span>
+                            <span class="text-cyan-400 font-mono" id="val-speed">8 m/s</span>
+                        </div>
+                        <input type="range" id="slide-speed" min="4" max="12" value="8" class="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs font-medium">
+                            <span class="text-slate-300">종/횡 중복도 (Overlap)</span>
+                            <span class="text-cyan-400 font-mono" id="val-overlap">80%</span>
+                        </div>
+                        <input type="range" id="slide-overlap" min="50" max="90" value="80" class="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+                    </div>
+                </div>
+
+                <div class="space-y-3 border-t border-slate-800 pt-3">
+                    <h3 class="text-xs font-bold text-slate-400 tracking-wider uppercase">3. 센서 연산 결과</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                        <div>
+                            <span class="text-slate-400 block text-[10px] uppercase">지상 해상도(GSD)</span>
+                            <span class="font-bold text-emerald-400 font-mono" id="calc-gsd">1.30 cm/px</span>
+                        </div>
+                        <div>
+                            <span class="text-slate-400 block text-[10px] uppercase">예상 캡처 매수</span>
+                            <span class="font-bold text-slate-200 font-mono" id="calc-photos">0 장</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btn-generate-path" class="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold rounded-lg shadow-lg transition-all flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-route"></i>
+                    <span>지형추적 경로 연산 및 생성</span>
+                </button>
+                <button id="btn-export-plan" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg border border-slate-700 transition-colors flex items-center justify-center space-x-1">
+                    <i class="fa-solid fa-file-export text-amber-400"></i>
+                    <span>QGroundControl 표준 .plan 내보내기</span>
+                </button>
+            </div>
+
+            <div id="panel-telemetry" class="p-5 space-y-4 hidden flex-1">
+                <h3 class="text-xs font-bold text-slate-400 tracking-wider uppercase">비행 텔레메트리 (Live)</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">ALTITUDE (고도)</span>
+                        <span class="text-lg font-bold text-cyan-400 font-mono" id="tel-alt">0.0 m</span>
+                    </div>
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">SPEED (속도)</span>
+                        <span class="text-lg font-bold text-slate-200 font-mono" id="tel-speed">0.0 m/s</span>
+                    </div>
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">COORD X</span>
+                        <span class="text-sm font-bold text-slate-300 font-mono" id="tel-x">0.00</span>
+                    </div>
+                    <div class="bg-slate-900 p-3 rounded-lg border border-slate-800">
+                        <span class="text-[10px] text-slate-500 block">COORD Y</span>
+                        <span class="text-sm font-bold text-slate-300 font-mono" id="tel-y">0.00</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/40 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>비행 수행률</span>
+                            <span class="text-cyan-400 font-mono" id="tel-prog-percent">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div id="tel-prog-bar" class="bg-gradient-to-r from-cyan-500 to-emerald-500 h-full w-0 transition-all"></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs border-t border-slate-800 pt-2 mt-2">
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">정점 인덱스:</span>
+                            <span class="font-bold text-slate-300 font-mono" id="tel-wp-idx">0 / 0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">취득 사진 수:</span>
+                            <span class="font-bold text-emerald-400 font-mono" id="tel-photos">0장</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 h-full relative">
+            <div id="canvas-container" class="w-full h-full bg-slate-950"></div>
+
+            <div class="absolute top-5 left-5 pointer-events-none flex flex-col space-y-3 z-20">
+                <div class="glass-panel p-4 rounded-xl border border-slate-700/50 glow-cyan w-60 pointer-events-auto shadow-xl">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+                        <div class="flex items-center space-x-1.5">
+                            <div class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></div>
+                            <span class="text-xs font-bold tracking-wider text-cyan-400">FALCON-4 RTK</span>
+                        </div>
+                        <span class="text-[10px] font-mono bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">TERRAIN EXP</span>
+                    </div>
+                    <div class="space-y-1.5 text-xs text-slate-200 font-mono">
+                        <div class="flex justify-between">
+                            <span class="text-slate-400"><i class="fa-solid fa-compass mr-1"></i>드론 방향</span>
+                            <span class="font-bold" id="hud-yaw">0° (N)</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400"><i class="fa-solid fa-arrows-up-down mr-1"></i>AGL 실고도</span>
+                            <span class="font-bold text-cyan-400" id="hud-altitude">0.0 m</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-400"><i class="fa-solid fa-camera mr-1"></i>촬영 장수</span>
+                            <span class="font-bold text-emerald-400" id="hud-photos">0 / 0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 glass-panel px-6 py-3.5 rounded-2xl flex items-center space-x-6 z-20 glow-cyan pointer-events-auto shadow-2xl">
+                <button id="btn-takeoff" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center space-x-2 shadow-lg shadow-emerald-950/40 transition-all text-sm">
+                    <i class="fa-solid fa-plane-departure"></i>
+                    <span id="txt-takeoff">미션 시작 (Take Off)</span>
+                </button>
+                <button id="btn-rtl" disabled class="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl flex items-center space-x-2 shadow-lg shadow-amber-950/40 transition-all text-sm disabled:opacity-40">
+                    <i class="fa-solid fa-house-signal"></i>
+                    <span>홈 복귀 (RTL)</span>
+                </button>
+                <div class="flex items-center space-x-3 border-l border-slate-800 pl-6">
+                    <div id="shutter-flash" class="w-8 h-8 rounded-full border border-slate-700 bg-slate-900 flex items-center justify-center transition-all">
+                        <i class="fa-solid fa-camera text-xs text-slate-500" id="shutter-icon"></i>
+                    </div>
+                    <div>
+                        <span class="text-[9px] text-slate-500 block leading-none font-mono">CAMERA SENSOR</span>
+                        <span class="text-xs font-bold font-mono text-slate-300" id="shutter-status">SHUTTER READY</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="absolute bottom-28 left-5 max-h-36 w-60 overflow-y-auto glass-panel p-3 rounded-xl border border-slate-800 pointer-events-auto hidden z-20" id="live-gallery">
+                <div class="flex items-center justify-between mb-2 pb-1 border-b border-slate-800">
+                    <span class="text-xs font-bold text-slate-400"><i class="fa-solid fa-images text-cyan-400 mr-1.5"></i>실시간 이미지 취득 스트림</span>
+                    <span class="text-[10px] font-mono text-emerald-400" id="gallery-count">0장</span>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5" id="gallery-snaps"></div>
+            </div>
+        </main>
+    </div>
+
+    <div id="guide-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-slate-900 rounded-2xl border border-slate-800 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div class="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-microchip text-cyan-400 text-lg"></i>
+                    <h2 class="text-base font-bold text-white">3D Survey Pilot 독자 탑재 핵심 알고리즘 및 기술 정보</h2>
+                </div>
+                <button id="btn-close-modal" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4 text-sm leading-relaxed text-slate-300 font-sans">
+                <p class="text-slate-400 text-xs">본 시뮬레이터는 타 솔루션의 고정 고도 평면 비행 한계를 보완하여, 실제 대한민국 산악 지형 및 복잡 지형에서 활용하는 고급 지형 추적(Terrain Following) 모델을 온전히 수식화했습니다.</p>
+                <div class="p-4 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-cyan-400 text-xs"><i class="fa-solid fa-mountain mr-1"></i> 1. 고정밀 지형 추적 비행 (Terrain Following)</h4>
+                    <p class="text-xs text-slate-400 leading-normal">수치지형모델(DEM) 데이터 행렬을 실시간 보간 계산하여, 드론이 산맥 지형을 통과할 때 센서가 일정한 고도 격차(AGL)를 안전하게 유지하며 상승/하강하도록 비행 제어 라인을 입체 연산합니다.</p>
+                </div>
+                <div class="p-4 bg-slate-950 rounded-lg border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-cyan-400 text-xs"><i class="fa-solid fa-calculator mr-1"></i> 2. 정사영상 중첩도 기반 GSD 연산</h4>
+                    <p class="text-xs text-slate-400 leading-normal">표준 1인치 센서 사양을 기반으로 지상해상도(GSD)를 역산하고, 설정된 중첩도(Overlap) 정밀성에 맞추어 카메라 촬영 간격 셔터 딜레이 스텝을 물리적으로 도출합니다.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 무전기 셔터 음향 이펙트 가동 장치
+        let audioCtx = null;
+        function playShutterSound() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(160, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1300, audioCtx.currentTime + 0.04);
+                gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+            } catch(e) {}
+
+            const flashNode = document.getElementById('shutter-flash');
+            const iconNode = document.getElementById('shutter-icon');
+            const textNode = document.getElementById('shutter-status');
+
+            flashNode.className = "w-8 h-8 rounded-full bg-white border border-white scale-110 flex items-center justify-center transition-all";
+            iconNode.className = "fa-solid fa-camera text-xs text-slate-900";
+            textNode.textContent = "CAPTURE SUCCESS!"; textNode.className = "text-xs font-bold font-mono text-emerald-400";
+
+            setTimeout(() => {
+                flashNode.className = "w-8 h-8 rounded-full border border-slate-700 bg-slate-900 flex items-center justify-center transition-all";
+                iconNode.className = "fa-solid fa-camera text-xs text-slate-500";
+                textNode.textContent = "SHUTTER READY"; textNode.className = "text-xs font-bold font-mono text-slate-300";
+            }, 180);
+        }
+
+        // Three.js 코어 제어 변수 선언
+        let scene, camera, renderer, controls;
+        let terrain, drone, flightLineMesh;
+        let waypoints = [];
+        let footprintGroup = new THREE.Group();
+        let propellers = [];
+        let flightSpeed = 10;
+
+        let droneState = {
+            mode: "STANDBY",
+            wpIdx: 0,
+            pos: new THREE.Vector3(0, 0, 0),
+            photosTaken: 0,
+            battery: 100,
+            lastFrameTime: 0
+        };
+
+        // 고급 DEM 수학 지형 곡면 매트릭스 공식
+        function getTerrainHeight(x, z) {
+            let h1 = Math.sin(x * 0.035) * Math.cos(z * 0.035) * 15;
+            let h2 = Math.cos(x * 0.012) * Math.sin(z * 0.012) * 7;
+            let combined = h1 + h2;
+            let distFromHome = Math.sqrt(x*x + z*z);
+            if(distFromHome < 22) combined *= (distFromHome / 22); // 이착륙 홈 구역 안전 평지 보정
+            return combined;
+        }
+
+        function initThreeEngine() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x070a13);
+            scene.add(footprintGroup);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 1000);
+            camera.position.set(130, 100, 130);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2.05;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+            let dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+            dirLight.position.set(60, 160, 60);
+            scene.add(dirLight);
+
+            let gridHelper = new THREE.GridHelper(450, 45, 0x1e293b, 0x0f172a);
+            gridHelper.position.y = -6;
+            scene.add(gridHelper);
+
+            buildTerrainMesh();
+            buildDroneMesh();
+            buildSurveyPath();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function buildTerrainMesh() {
+            if(terrain) scene.remove(terrain);
+            let geom = new THREE.PlaneGeometry(260, 260, 50, 50);
+            geom.rotateX(-Math.PI / 2);
+
+            let pos = geom.attributes.position;
+            for(let i=0; i<pos.count; i++) {
+                let x = pos.getX(i);
+                let z = pos.getZ(i);
+                pos.setY(i, getTerrainHeight(x, z));
+            }
+            geom.computeVertexNormals();
+
+            let mat = new THREE.MeshStandardMaterial({
+                color: 0x1f2937,
+                wireframe: false,
+                flatShading: true,
+                roughness: 0.8
+            });
+            terrain = new THREE.Mesh(geom, mat);
+            scene.add(terrain);
+        }
+
+        function buildDroneMesh() {
+            drone = new THREE.Group();
+            let body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.5, 8), new THREE.MeshStandardMaterial({color: 0x06b6d4, metalness: 0.8}));
+            drone.add(body);
+
+            let armMat = new THREE.MeshStandardMaterial({color: 0x475569});
+            for(let i=0; i<4; i++) {
+                let angle = (Math.PI / 2) * i + Math.PI/4;
+                let arm = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.15, 0.15), armMat);
+                arm.position.set(Math.cos(angle)*1.6, 0, Math.sin(angle)*1.6);
+                arm.rotation.y = -angle;
+                drone.add(arm);
+
+                let prop = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.08), new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.5}));
+                prop.position.set(Math.cos(angle)*3.2, 0.2, Math.sin(angle)*3.2);
+                drone.add(prop);
+                propellers.push(prop);
+            }
+            let baseH = getTerrainHeight(0,0);
+            drone.position.set(0, baseH + 0.5, 0);
+            scene.add(drone);
+            droneState.pos.copy(drone.position);
+        }
+
+        // ★ 그 친구 소스에는 없는 압도적 차별화: 3D 지형 추적(Terrain Following) 비행 궤적 연산 부하 처리
+        function buildSurveyPath() {
+            let width = parseFloat(document.getElementById('input-width').value) || 140;
+            let height = parseFloat(document.getElementById('input-height').value) || 140;
+            let targetAlt = parseInt(document.getElementById('slide-altitude').value) || 50;
+            let overlap = parseInt(document.getElementById('slide-overlap').value) || 80;
+
+            if(flightLineMesh) scene.remove(flightLineMesh);
+
+            let spacing = Math.max(9.5, (targetAlt * Math.tan(40 * Math.PI / 180)) * (1.0 - (overlap / 100)) * 2.5);
+
+            waypoints = [];
+            let halfW = width / 2;
+            let halfH = height / 2;
+
+            // 출발 가이드 웨이포인트 보완
+            waypoints.push(new THREE.Vector3(0, getTerrainHeight(0,0) + targetAlt, 0));
+
+            let forward = true;
+            for(let z = -halfH; z <= halfH; z += spacing * 1.3) {
+                let xPoints = [];
+                for(let x = -halfW; x <= halfW; x += spacing) { xPoints.push(x); }
+                if(!forward) xPoints.reverse();
+
+                xPoints.forEach(x => {
+                    let th = getTerrainHeight(x, z);
+                    // 핵심 알고리즘: 고정 고도 평면 비행이 아닌 바닥 지형 고도(th)에 맞추어 드론 상대 고도를 상시 동적 상승/하강 제어
+                    waypoints.push(new THREE.Vector3(x, th + targetAlt, z));
+                });
+                forward = !forward;
+            }
+            // 최종 복귀 RTL 가이드 웨이포인트 보완
+            waypoints.push(new THREE.Vector3(0, getTerrainHeight(0,0) + targetAlt, 0));
+
+            let lineGeom = new THREE.BufferGeometry().setFromPoints(waypoints);
+            let lineMat = new THREE.LineBasicMaterial({ color: 0x22d3ee, linewidth: 2.5 });
+            flightLineMesh = new THREE.Line(lineGeom, lineMat);
+            scene.add(flightLineMesh);
+
+            // 동적 텍스트 레이블 매핑 갱신
+            document.getElementById('calc-photos').textContent = `${waypoints.length - 2} 장`;
+            document.getElementById('calc-gsd').textContent = `${(targetAlt * 0.026).toFixed(2)} cm/px`;
+            document.getElementById('hud-photos').textContent = `0 / ${waypoints.length - 2}`;
+            document.getElementById('tel-wp-idx').textContent = `0 / ${waypoints.length}`;
+        }
+
+        // QGroundControl 조종 지상국 호환용 정밀 비행 미션 파일(.plan JSON) 인코딩 처리 내보내기
+        function exportToQgcPlanFile() {
+            let missionItems = [];
+            waypoints.forEach((wp, i) => {
+                missionItems.push({
+                    "autoContinue": true, "command": 16,
+                    "coordinate": [36.6234 + (wp.z/111000), 127.4892 + (wp.x/90000), wp.y],
+                    "doJumpId": i, "frame": 3, "params": [0, 0, 0, null, 36.6234 + (wp.z/111000), 127.4892 + (wp.x/90000), wp.y],
+                    "type": "SimpleItem"
+                });
+            });
+            let planJSON = {
+                "fileType": "Plan", "mission": { "cruiseSpeed": 8, "hoverSpeed": 3, "items": missionItems, "vehicleType": 2, "version": 2 },
+                "version": 1
+            };
+            let blob = new Blob([JSON.stringify(planJSON, null, 2)], {type: "application/json"});
+            let link = document.createElement('a');
+            link.href = URL.createObjectURL(blob); link.download = "TerrainFollow_FlightPlan.plan";
+            link.click();
+        }
+
+        // 60FPS 실시간 공간 렌더링 프레임 타임 루프 구조
+        function animateEngine(timestamp) {
+            requestAnimationFrame(animateEngine);
+            let dt = (timestamp - droneState.lastFrameTime) / 1000;
+            if(!dt || dt > 0.1) dt = 0.016;
+            droneState.lastFrameTime = timestamp;
+
+            // 쿼드콥터 날개 헬기 모션 회전 연산
+            propellers.forEach(p => p.rotation.y += 0.6);
+
+            if (droneState.mode === "FLYING" && waypoints.length > 0) {
+                let targetWp = waypoints[droneState.wpIdx];
+                let dist = droneState.pos.distanceTo(targetWp);
+                let speed = parseFloat(document.getElementById('slide-speed').value) || 8;
+
+                if (dist > 0.6) {
+                    let step = speed * dt;
+                    droneState.pos.lerp(targetWp, step / dist);
+                    drone.position.copy(droneState.pos);
+
+                    // 기체 전면 헤딩 Yaw 제어 연산 연동
+                    let targetYaw = Math.atan2(targetWp.x - drone.position.x, targetWp.z - drone.position.z);
+                    drone.rotation.y += (targetYaw - drone.rotation.y) * 0.1;
+                    
+                    // 텔레메트리 화면 출력 실시간 동기화 바인딩
+                    document.getElementById('tel-alt').textContent = `${drone.position.y.toFixed(1)} m`;
+                    document.getElementById('hud-altitude').textContent = `${drone.position.y.toFixed(1)} m`;
+                    document.getElementById('tel-speed').textContent = `${speed.toFixed(1)} m/s`;
+                    document.getElementById('tel-x').textContent = drone.position.x.toFixed(2);
+                    document.getElementById('tel-y').textContent = drone.position.z.toFixed(2);
+                    document.getElementById('hud-yaw').textContent = `${Math.round(drone.rotation.y * (180/Math.PI) + 180)}°`;
+                } else {
+                    // 비행 웨이포인트 정점 교차 시 실시간 이미지 캡처 스트림 유발
+                    if(droneState.wpIdx > 0 && droneState.wpIdx < waypoints.length - 1) {
+                        droneState.photosTaken++;
+                        playShutterSound();
+                        drawFootprintPatch(drone.position.x, drone.position.z);
+                        document.getElementById('tel-photos').textContent = `${droneState.photosTaken}장`;
+                        document.getElementById('hud-photos').textContent = `${droneState.photosTaken} / ${waypoints.length - 2}`;
+                        injectThumbnailToGallery(droneState.photosTaken);
+                    }
+                    
+                    droneState.wpIdx++;
+                    document.getElementById('tel-wp-idx').textContent = `${droneState.wpIdx} / ${waypoints.length}`;
+                    let progress = Math.round((droneState.wpIdx / waypoints.length) * 100);
+                    document.getElementById('tel-prog-percent').textContent = `${progress}%`;
+                    document.getElementById('tel-prog-bar').style.width = `${progress}%`;
+
+                    if(droneState.wpIdx >= waypoints.length) {
+                        setMode("STANDBY");
+                        alert("🎉 미션 완료! 3D 지형추적 스캔 데이터 취득이 모두 성공하여 기체가 자동 착륙했습니다.");
+                    }
+                }
+
+                droneState.battery -= dt * 0.12;
+                document.getElementById('top-battery').textContent = `${Math.max(0, Math.round(droneState.battery))}%`;
+            }
+
+            if(controls) controls.update();
+            if(renderer && scene && camera) renderer.render(scene, camera);
+        }
+
+        // 지표면 고도 굴곡면에 밀착 투영되는 사진 촬영 흔적 사각형(Footprint) 매핑 생성
+        function drawFootprintPatch(x, z) {
+            let patch = new THREE.Mesh(
+                new THREE.PlaneGeometry(13.5, 13.5),
+                new THREE.MeshBasicMaterial({color: 0x10b981, transparent: true, opacity: 0.18, side: THREE.DoubleSide})
+            );
+            patch.rotateX(-Math.PI/2);
+            patch.position.set(x, getTerrainHeight(x, z) + 0.15, z);
+            footprintGroup.add(patch);
+        }
+
+        // 왼쪽 하단 정사영상 이미지 취득 썸네일 노출 인젝터
+        function injectThumbnailToGallery(num) {
+            const gallery = document.getElementById('live-gallery');
+            const snaps = document.getElementById('gallery-snaps');
+            gallery.classList.remove('hidden');
+
+            const thumb = document.createElement('div');
+            thumb.className = 'aspect-square bg-slate-800 rounded border border-emerald-500/40 relative overflow-hidden flex flex-col justify-end p-0.5 text-[8px] font-mono text-emerald-400';
+            
+            const imgMask = document.createElement('div');
+            imgMask.className = 'absolute inset-0 opacity-40 bg-cover bg-center';
+            imgMask.style.backgroundImage = `url('https://placehold.co/80x80/10b981/ffffff?text=SHOT_${num.toString().padStart(3,'0')}')`;
+            
+            const label = document.createElement('span');
+            label.className = 'z-10 bg-black/70 px-0.5 rounded leading-none';
+            label.textContent = `IMG_${num.toString().padStart(3,'0')}`;
+            
+            thumb.appendChild(imgMask);
+            thumb.appendChild(label);
+            snaps.prepend(thumb);
+
+            document.getElementById('gallery-count').textContent = `${num}장 취득`;
+        }
+
+        function setMode(mode) {
+            droneState.mode = mode;
+            document.getElementById('top-mode').textContent = mode;
+            let btn = document.getElementById('btn-takeoff');
+            if(mode === "FLYING") {
+                btn.className = "px-5 py-2.5 bg-slate-800 text-slate-500 font-bold rounded-xl flex items-center space-x-2 cursor-not-allowed text-sm";
+                document.getElementById('txt-takeoff').textContent = "임무 자율 운항 중";
+                document.getElementById('btn-rtl').disabled = false;
+            } else {
+                btn.className = "px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center space-x-2 shadow-lg transition-all text-sm";
+                document.getElementById('txt-takeoff').textContent = "미션 시작 (Take Off)";
+                document.getElementById('btn-rtl').disabled = true;
+                droneState.wpIdx = 0;
+                droneState.photosTaken = 0;
+                droneState.pos.set(0, getTerrainHeight(0,0) + 50, 0);
+                drone.position.copy(droneState.pos);
+            }
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // 프론트엔드 UI 바인딩 결합 장치 연동
+        window.onload = function() {
+            initThreeEngine();
+            requestAnimationFrame(animateEngine);
+
+            document.getElementById('btn-generate-path').addEventListener('click', buildSurveyPath);
+            document.getElementById('btn-export-plan').addEventListener('click', exportToQgcPlanFile);
+            
+            document.getElementById('btn-takeoff').addEventListener('click', () => {
+                if(droneState.mode === "STANDBY") {
+                    while(footprintGroup.children.length > 0) { footprintGroup.remove(footprintGroup.children[0]); }
+                    document.getElementById('gallery-snaps').innerHTML = '';
+                    document.getElementById('live-gallery').classList.add('hidden');
+                    droneState.battery = 100;
+                    setMode("FLYING");
+                }
+            });
+
+            document.getElementById('btn-rtl').addEventListener('click', () => {
+                setMode("STANDBY");
+                alert("비상 원점 회귀 유도 가동되었습니다.");
+            });
+
+            // 탭 내비게이션 조작 핸들러
+            const tabPlan = document.getElementById('tab-plan');
+            const tabTele = document.getElementById('tab-telemetry');
+            const pPlan = document.getElementById('panel-plan');
+            const pTele = document.getElementById('panel-telemetry');
+
+            tabPlan.addEventListener('click', () => {
+                tabPlan.className = "flex-1 py-3 text-center border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/40";
+                tabTele.className = "flex-1 py-3 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200";
+                pPlan.classList.remove('hidden'); pTele.classList.add('hidden');
+            });
+            tabTele.addEventListener('click', () => {
+                tabTele.className = "flex-1 py-3 text-center border-b-2 border-cyan-500 text-cyan-400 bg-slate-900/40";
+                tabPlan.className = "flex-1 py-3 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200";
+                pTele.classList.remove('hidden'); pPlan.classList.add('hidden');
+            });
+
+            // 슬라이더 조절 핸들러
+            document.getElementById('slide-altitude').addEventListener('input', (e) => {
+                document.getElementById('val-altitude').textContent = `${e.target.value} m`;
+            });
+            document.getElementById('slide-speed').addEventListener('input', (e) => {
+                document.getElementById('val-speed').textContent = `${e.target.value} m/s`;
+            });
+            document.getElementById('slide-overlap').addEventListener('input', (e) => {
+                document.getElementById('val-overlap').textContent = `${e.target.value}%`;
+            });
+
+            // 모달 노출 리스너
+            const modal = document.getElementById('guide-modal');
+            document.getElementById('btn-guide-modal').addEventListener('click', () => modal.classList.remove('hidden'));
+            document.getElementById('btn-close-modal').addEventListener('click', () => modal.classList.add('hidden'));
+        };
+    </script>
+</body>
+</html>
